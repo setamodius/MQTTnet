@@ -1,170 +1,141 @@
-﻿using MQTTnet.Core;
-using MQTTnet.Core.Client;
-using MQTTnet.Core.Diagnostics;
-using MQTTnet.Core.Packets;
-using MQTTnet.Core.Protocol;
-using MQTTnet.Core.Server;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Text;
+using System.IO;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
+using MQTTnet.Client;
+using MQTTnet.Client.Options;
+using MQTTnet.Diagnostics;
+using MQTTnet.Server;
+using Newtonsoft.Json;
 
 namespace MQTTnet.TestApp.NetCore
 {
     public static class Program
     {
-        public static void Main(string[] args)
+        public static void Main()
         {
-            Console.WriteLine("MQTTnet - TestApp.NetFramework");
+            Console.WriteLine($"MQTTnet - TestApp.{TargetFrameworkInfoProvider.TargetFramework}");
             Console.WriteLine("1 = Start client");
             Console.WriteLine("2 = Start server");
+            Console.WriteLine("3 = Start performance test");
+            Console.WriteLine("4 = Start managed client");
+            Console.WriteLine("5 = Start public broker test");
+            Console.WriteLine("6 = Start server & client");
+            Console.WriteLine("7 = Client flow test");
+            Console.WriteLine("8 = Start performance test (client only)");
+            Console.WriteLine("9 = Start server (no trace)");
+            Console.WriteLine("a = Start QoS 2 benchmark");
+            Console.WriteLine("b = Start QoS 1 benchmark");
+            Console.WriteLine("c = Start QoS 0 benchmark");
+
             var pressedKey = Console.ReadKey(true);
-            if (pressedKey.Key == ConsoleKey.D1)
+            if (pressedKey.KeyChar == '1')
             {
-                Task.Run(() => RunClientAsync(args));
-                Thread.Sleep(Timeout.Infinite);
+                Task.Run(ClientTest.RunAsync);
             }
-            else if (pressedKey.Key == ConsoleKey.D2)
+            else if (pressedKey.KeyChar == '2')
             {
-                Task.Run(() => RunServerAsync(args));
-                Thread.Sleep(Timeout.Infinite);
+                Task.Run(ServerTest.RunAsync);
             }
+            else if (pressedKey.KeyChar == '3')
+            {
+                PerformanceTest.RunClientAndServer();
+                return;
+            }
+            else if (pressedKey.KeyChar == '4')
+            {
+                Task.Run(ManagedClientTest.RunAsync);
+            }
+            else if (pressedKey.KeyChar == '5')
+            {
+                Task.Run(PublicBrokerTest.RunAsync);
+            }
+            else if (pressedKey.KeyChar == '6')
+            {
+                Task.Run(ServerAndClientTest.RunAsync);
+            }
+            else if (pressedKey.KeyChar == '7')
+            {
+                Task.Run(ClientFlowTest.RunAsync);
+            }
+            else if (pressedKey.KeyChar == '8')
+            {
+                PerformanceTest.RunClientOnly();
+                return;
+            }
+            else if (pressedKey.KeyChar == '9')
+            {
+                ServerTest.RunEmptyServer();
+                return;
+            }
+            else if (pressedKey.KeyChar == 'a')
+            {
+                Task.Run(PerformanceTest.RunQoS2Test);
+            }
+            else if (pressedKey.KeyChar == 'b')
+            {
+                Task.Run(PerformanceTest.RunQoS1Test);
+            }
+            else if (pressedKey.KeyChar == 'c')
+            {
+                Task.Run(PerformanceTest.RunQoS0Test);
+            }
+
+            Thread.Sleep(Timeout.Infinite);
+        }
+    }
+
+    public class RetainedMessageHandler : IMqttServerStorage
+    {
+        private const string Filename = "C:\\MQTT\\RetainedMessages.json";
+
+        public Task SaveRetainedMessagesAsync(IList<MqttApplicationMessage> messages)
+        {
+            var directory = Path.GetDirectoryName(Filename);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(Filename, JsonConvert.SerializeObject(messages));
+            return Task.FromResult(0);
         }
 
-        private static async Task RunClientAsync(string[] arguments)
+        public Task<IList<MqttApplicationMessage>> LoadRetainedMessagesAsync()
         {
-
-            MqttNetTrace.TraceMessagePublished += (s, e) =>
+            IList<MqttApplicationMessage> retainedMessages;
+            if (File.Exists(Filename))
             {
-                Console.WriteLine($">> [{e.ThreadId}] [{e.Source}] [{e.Level}]: {e.Message}");
-                if (e.Exception != null)
-                {
-                    Console.WriteLine(e.Exception);
-                }
-            };
-
-            try
-            {
-                var options = new MqttClientWebSocketOptions
-                {
-                    Uri = "localhost",
-                    ClientId = "XYZ",
-                    CleanSession = true
-                };
-
-                var client = new MqttClientFactory().CreateMqttClient();
-                client.ApplicationMessageReceived += (s, e) =>
-                {
-                    Console.WriteLine("### RECEIVED APPLICATION MESSAGE ###");
-                    Console.WriteLine($"+ Topic = {e.ApplicationMessage.Topic}");
-                    Console.WriteLine($"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.Payload)}");
-                    Console.WriteLine($"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}");
-                    Console.WriteLine($"+ Retain = {e.ApplicationMessage.Retain}");
-                    Console.WriteLine();
-                };
-
-                client.Connected += async (s, e) =>
-                {
-                    Console.WriteLine("### CONNECTED WITH SERVER ###");
-
-                    await client.SubscribeAsync(new List<TopicFilter>
-                    {
-                        new TopicFilter("#", MqttQualityOfServiceLevel.AtMostOnce)
-                    });
-
-                    Console.WriteLine("### SUBSCRIBED ###");
-                };
-
-                client.Disconnected += async (s, e) =>
-                {
-                    Console.WriteLine("### DISCONNECTED FROM SERVER ###");
-                    await Task.Delay(TimeSpan.FromSeconds(5));
-
-                    try
-                    {
-                        await client.ConnectAsync(options);
-                    }
-                    catch
-                    {
-                        Console.WriteLine("### RECONNECTING FAILED ###");
-                    }
-                };
-
-                try
-                {
-                    await client.ConnectAsync(options);
-                }
-                catch (Exception exception)
-                {
-                    Console.WriteLine("### CONNECTING FAILED ###" + Environment.NewLine + exception);
-                }
-
-                Console.WriteLine("### WAITING FOR APPLICATION MESSAGES ###");
-
-                while (true)
-                {
-                    Console.ReadLine();
-
-                    var applicationMessage = new MqttApplicationMessage(
-                        "A/B/C",
-                        Encoding.UTF8.GetBytes("Hello World"),
-                        MqttQualityOfServiceLevel.AtLeastOnce,
-                        false
-                    );
-
-                    await client.PublishAsync(applicationMessage);
-                }
+                var json = File.ReadAllText(Filename);
+                retainedMessages = JsonConvert.DeserializeObject<List<MqttApplicationMessage>>(json);
             }
-            catch (Exception exception)
+            else
             {
-                Console.WriteLine(exception);
+                retainedMessages = new List<MqttApplicationMessage>();
             }
+
+            return Task.FromResult(retainedMessages);
         }
+    }
 
-        private static void RunServerAsync(string[] arguments)
+    public class WikiCode
+    {
+        public void Code()
         {
-            MqttNetTrace.TraceMessagePublished += (s, e) =>
-            {
-                Console.WriteLine($">> [{e.ThreadId}] [{e.Source}] [{e.Level}]: {e.Message}");
-                if (e.Exception != null)
+            //Validate certificate.
+            var options = new MqttClientOptionsBuilder()
+                .WithTls(new MqttClientOptionsBuilderTlsParameters
                 {
-                    Console.WriteLine(e.Exception);
-                }
-            };
-
-            try
-            {
-                var options = new MqttServerOptions
-                {
-                    ConnectionValidator = p =>
-                    {
-                        if (p.ClientId == "SpecialClient")
+                    CertificateValidationCallback = (X509Certificate x, X509Chain y, SslPolicyErrors z, IMqttClientOptions o) =>
                         {
-                            if (p.Username != "USER" || p.Password != "PASS")
-                            {
-                                return MqttConnectReturnCode.ConnectionRefusedBadUsernameOrPassword;
-                            }
+                            // TODO: Check conditions of certificate by using above parameters.
+                            return true;
                         }
-
-                        return MqttConnectReturnCode.ConnectionAccepted;
-                    }
-                };
-
-                var mqttServer = new MqttServerFactory().CreateMqttServer(options);
-                mqttServer.StartAsync();
-
-                Console.WriteLine("Press any key to exit.");
-                Console.ReadLine();
-
-                mqttServer.StopAsync();
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-            }
-
-            Console.ReadLine();
+                })
+                .Build();
         }
     }
 }

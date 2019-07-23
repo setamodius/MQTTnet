@@ -197,7 +197,7 @@ ClientBin/
 *.dbmdl
 *.dbproj.schemaview
 *.jfm
-*.pfx
+# *.pfx
 *.publishsettings
 orleans.codegen.cs
 
@@ -235,6 +235,7 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+/*/**/package-lock.json
 
 # Typescript v1 declaration files
 typings/
@@ -287,5 +288,7 @@ __pycache__/
 *.odx.cs
 *.xsd.cs
 
+*.js
+*.map
 
-Build/nuget.exe
+/Tests/MQTTnet.TestApp.NetCore/RetainedMessages.json
